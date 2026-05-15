@@ -180,6 +180,11 @@ def authenticate():
 
 
 def load_token():
+    # Allow passing token directly via env (useful for GitHub Actions)
+    env = load_env()
+    direct = env.get("LINKEDIN_ACCESS_TOKEN")
+    if direct:
+        return direct
     if not os.path.exists(TOKEN_FILE):
         print("Not authenticated. Run:  python linkedin.py auth")
         sys.exit(1)
