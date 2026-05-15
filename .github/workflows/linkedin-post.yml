@@ -1,0 +1,36 @@
+name: Post to LinkedIn
+
+on:
+  workflow_dispatch:
+    inputs:
+      idea:
+        description: "Post idea (Claude expands it into a full post)"
+        required: false
+      file:
+        description: "Article file path (e.g. medium-articles/linkedin-post-design-system.md)"
+        required: false
+        default: "medium-articles/linkedin-post-design-system.md"
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Write credentials
+        run: |
+          echo "LINKEDIN_CLIENT_ID=${{ secrets.LINKEDIN_CLIENT_ID }}" >> .env
+          echo "LINKEDIN_CLIENT_SECRET=${{ secrets.LINKEDIN_CLIENT_SECRET }}" >> .env
+          echo "LINKEDIN_ACCESS_TOKEN=${{ secrets.LINKEDIN_ACCESS_TOKEN }}" >> .env
+
+      - name: Post from idea
+        if: ${{ inputs.idea != '' }}
+        run: echo "y" | python linkedin.py post --idea "${{ inputs.idea }}"
+
+      - name: Post from file
+        if: ${{ inputs.idea == '' }}
+        run: echo "y" | python linkedin.py post --file "${{ inputs.file }}"
