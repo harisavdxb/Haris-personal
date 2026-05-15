@@ -38,6 +38,7 @@ API_BASE       = "https://api.linkedin.com/v2"
 AUTH_URL       = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL      = "https://www.linkedin.com/oauth/v2/accessToken"
 REDIRECT_URI   = "http://localhost:8000/callback"
+REMOTE_MODE    = True   # Set False if running locally with a browser on the same machine
 SCOPES         = "openid profile w_member_social"
 TOKEN_FILE     = os.path.join(os.path.dirname(__file__), ".linkedin_token.json")
 ENV_FILE       = os.path.join(os.path.dirname(__file__), ".env")
@@ -100,6 +101,24 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
+def exchange_code(code, client_id, client_secret):
+    token_data = urllib.parse.urlencode({
+        "grant_type":    "authorization_code",
+        "code":          code,
+        "redirect_uri":  REDIRECT_URI,
+        "client_id":     client_id,
+        "client_secret": client_secret,
+    }).encode()
+    req = urllib.request.Request(TOKEN_URL, data=token_data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        print(f"Token exchange failed: {e.read().decode()}")
+        sys.exit(1)
+
+
 def authenticate():
     client_id, client_secret = get_credentials()
     state = secrets.token_urlsafe(16)
@@ -113,38 +132,50 @@ def authenticate():
     })
     auth_link = f"{AUTH_URL}?{auth_params}"
 
-    print("Opening LinkedIn login in your browser...")
-    print(f"\nIf it doesn't open automatically, visit:\n{auth_link}\n")
-    webbrowser.open(auth_link)
+    if REMOTE_MODE:
+        # Remote mode: user visits link manually, pastes back the redirect URL
+        print("=" * 60)
+        print("STEP 1 — Open this URL in your browser:")
+        print()
+        print(auth_link)
+        print()
+        print("STEP 2 — Log in to LinkedIn and approve access.")
+        print()
+        print("STEP 3 — You'll be redirected to localhost:8000 (which will")
+        print("         show an error — that's expected).")
+        print()
+        print("STEP 4 — Copy the FULL URL from your browser's address bar")
+        print("         and paste it below.")
+        print("=" * 60)
+        redirect_url = input("\nPaste the redirect URL here: ").strip()
 
-    server = HTTPServer(("localhost", 8000), _CallbackHandler)
-    server.timeout = 120
-    print("Waiting for LinkedIn authorization (2 min timeout)...")
-    server.handle_request()
+        parsed = urllib.parse.urlparse(redirect_url)
+        params = urllib.parse.parse_qs(parsed.query)
+        if "code" not in params:
+            print("ERROR: No code found in URL. Make sure you copied the full URL.")
+            sys.exit(1)
+        code = params["code"][0]
+    else:
+        # Local mode: start a local server for automatic callback
+        global _auth_code
+        _auth_code = None
+        webbrowser.open(auth_link)
+        server = HTTPServer(("localhost", 8000), _CallbackHandler)
+        server.timeout = 120
+        print("Waiting for LinkedIn authorization...")
+        server.handle_request()
+        if not _auth_code:
+            print("ERROR: No authorization code received.")
+            sys.exit(1)
+        code = _auth_code
 
-    if not _auth_code:
-        print("ERROR: No authorization code received.")
-        sys.exit(1)
-
-    # Exchange code for token
-    token_data = urllib.parse.urlencode({
-        "grant_type":    "authorization_code",
-        "code":          _auth_code,
-        "redirect_uri":  REDIRECT_URI,
-        "client_id":     client_id,
-        "client_secret": client_secret,
-    }).encode()
-
-    req = urllib.request.Request(TOKEN_URL, data=token_data, method="POST")
-    req.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(req) as resp:
-        token_resp = json.loads(resp.read().decode())
+    token_resp = exchange_code(code, client_id, client_secret)
 
     with open(TOKEN_FILE, "w") as f:
         json.dump(token_resp, f, indent=2)
     os.chmod(TOKEN_FILE, 0o600)
 
-    print(f"\nAuthenticated! Token saved to {TOKEN_FILE}")
+    print(f"\nAuthenticated! Token saved.")
     return token_resp["access_token"]
 
 
